@@ -1,0 +1,105 @@
+---
+title: "Data Cleaning"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r libs, message=FALSE}
+library(dplyr)
+library(tidyr)
+```
+
+## Data Sources
+
+Read in data from [KNB](https://knb.ecoinformatics.org/view/df35b.304.2).
+
+```{r dataload}
+catch_original=read.csv("https://knb.ecoinformatics.org/knb/d1/mn/v2/object/df35b.302.1")
+glimpse(catch_original) #dplyr
+#how this is really different from str() I don't know...
+```
+
+## Clean and Reshape Data
+
+* remove unneeded columns
+
+```{r}
+catch_data = catch_original %>% 
+  select(-All, -notesRegCode)
+```
+
+* check column types
+
+```{r}
+catch_clean = catch_data %>% 
+  mutate(Chinook = as.integer(Chinook))
+
+er=which(is.na(catch_clean$Chinook))
+catch_data[er,]
+
+catch_clean = catch_data %>% 
+  mutate(Chinook = ifelse(Chinook=="I",1,Chinook)) %>% 
+  mutate(Chinook = as.integer(Chinook))
+
+#alternatively
+catch_clean = catch_data %>% 
+  mutate(Chinook = gsub("I",1,Chinook)) %>% 
+  mutate(Chinook = as.integer(Chinook))
+
+#alternatively
+catch_clean = catch_data %>% 
+  mutate(Chinook = if_else(Chinook=="I","1",Chinook)) %>% 
+  mutate(Chinook = as.integer(Chinook))
+
+```
+
+* reshape data
+
+```{r}
+catch_long = catch_clean %>% 
+  pivot_longer(Chinook:Chum, names_to = "Species", values_to = "Catch")
+
+#alternatively
+catch_long2 = catch_clean %>% 
+  gather(Species, Catch, Chinook:Chum)
+
+catch_wide = catch_long %>% 
+  pivot_wider(names_from = Region, values_from = Catch)
+
+```
+
+* convert units
+
+```{r}
+catch_long = catch_long %>% 
+  rename(Catch_thousands = Catch) %>% 
+  mutate(Catch = Catch_thousands*1000)
+```
+
+* summarize etc.
+
+```{r}
+catch_sum = catch_long %>% 
+  group_by(Species, Region) %>% 
+  summarise(Total=mean(Catch_thousands),
+            n=n(), .groups = "drop") #newer equivalent to ungrouping
+```
+
+* join region data 
+
+```{r}
+region_defs <- read.csv("https://knb.ecoinformatics.org/knb/d1/mn/v2/object/df35b.303.1") %>% 
+    select(code, mgmtArea)
+
+head(region_defs)
+
+catch_joined = left_join(catch_long, region_defs, by=c("Region"="code"))
+head(catch_joined)
+
+```
+
