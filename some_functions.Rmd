@@ -1,0 +1,46 @@
+---
+title: "Some functions"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+airtemps=c(212,70,50,32)
+FtoC=function(Far) {
+  Cel=(Far-32)*5/9
+  return(Cel)
+}
+FtoC(airtemps)
+
+CtoF=function(Cel) {
+  Far=Cel*9/5+32
+  return(Far)
+}
+
+Cvals=c(0,10,20,30,40)
+Fvals=CtoF(Cvals)
+tempsdf=data.frame(Cvals=Cvals,Fvals=Fvals)
+```
+
+
+```{r}
+custom_theme=function(base_size=9) {
+  ggplot2::theme(
+    axis.ticks = ggplot2::element_blank(),
+    text = ggplot2::element_text(family="Helvetica",color="gray30",size=base_size),
+  )
+}
+
+library(ggplot2)
+
+ggplot(tempsdf, aes(x=Fvals,y=Cvals)) +
+  geom_point() +
+  custom_theme()
+
+```
+
