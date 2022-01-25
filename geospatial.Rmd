@@ -1,0 +1,164 @@
+---
+title: "Spatial Stuff"
+author: "Tanya Rogers"
+date: "1/24/2022"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(sf)
+library(ggplot2)
+library(ggmap)
+library(scales)
+library(leaflet)
+library(dplyr)
+```
+
+```{r}
+ak_regions = read_sf("shapefiles/ak_regions_simp.shp")
+class(ak_regions) #special type of data frame
+plot(ak_regions)
+```
+
+Coordinate reference systems
+Projections have 4 digit codes
+
+```{r}
+#view or set CRS
+st_crs(ak_regions)
+
+#transform CRS to one optimized for AK
+ak_regions_3338 = st_transform(ak_regions, crs=3338)
+
+plot(ak_regions_3338)
+```
+
+Integration with tidyverse
+Can select and filter sf objects. Geometry column containing polygons will always be kept ("sticky").
+
+```{r}
+select(ak_regions_3338, region)
+filter(ak_regions_3338, region=="Yukon")
+?sf::tidyverse
+```
+
+Population data
+
+```{r}
+pop = read.csv("shapefiles/alaska_population.csv")
+head(pop)
+
+#convert to sf object and set CRS
+pop_4326=st_as_sf(pop, coords = c("lng","lat"), crs=4326, remove = F)
+class(pop_4326)
+st_crs(pop_4326)
+#4326 is reasonable assumption for lat/lon GPS data
+
+#transform to 3338
+pop_3338=st_transform(pop_4326, crs=3338)
+```
+
+Spatial join
+Left joined by default, have to specify how to join spatial elements, which will depend on type of spatial data (e.g. points, lines, polygons) and table order. Geometry of left is retained.
+
+```{r}
+#find what region each city is in
+pop_joined = st_join(pop_3338, ak_regions_3338, join=st_within)
+head(pop_joined)
+```
+
+Get total population by region
+
+```{r}
+pop_region=pop_joined %>% 
+  as.data.frame() %>%  #drops geometry column
+  group_by(region) %>% 
+  summarise(total_pop=sum(population))
+head(pop_region)
+```
+
+If you group by and summarize without removing geometry column, the polygons will be 'unioned', or kept separate if do_union=F. 
+
+Assign total population to regions by joining to region sf object.
+
+```{r}
+pop_region_3338 = left_join(ak_regions_3338, pop_region)
+plot(pop_region_3338)
+```
+
+# Maps
+
+Rivers data
+
+```{r}
+rivers = read_sf("shapefiles/ak_rivers_simp.shp")
+st_crs(rivers)
+```
+
+
+Scales package handy for specifying axes (comma, percent). Useful for formatting log axes.
+
+```{r}
+ggplot() +
+  #don't need to specify x and y for geom_sf
+  geom_sf(data = pop_region_3338, aes(fill=total_pop)) +
+  geom_sf(data=rivers, aes(size=StrOrder)) +
+  geom_sf(data=pop_3338, aes(), size=0.5) +
+  scale_size(range = c(0.01,0.2), guide = "none") +
+  theme_bw() +
+  labs(fill="Total\nPopulation") +
+  scale_fill_continuous(low="khaki",high="firebrick",labels=comma)
+```
+
+Incorporating base maps (raster, tile servers) using ggmap
+Have to convert to raster projection (3857).
+Stamen maps don't require API keys like google maps.
+
+```{r}
+pop_3857=st_transform(pop_3338, crs=3857)
+```
+
+```{r}
+# Define a function to fix the bbox to be in EPSG:3857
+# See https://github.com/dkahle/ggmap/issues/160#issuecomment-397055208
+ggmap_bbox_to_3857 <- function(map) {
+  if (!inherits(map, "ggmap")) stop("map must be a ggmap object")
+  # Extract the bounding box (in lat/lon) from the ggmap to a numeric vector, 
+  # and set the names to what sf::st_bbox expects:
+  map_bbox <- setNames(unlist(attr(map, "bb")), 
+                       c("ymin", "xmin", "ymax", "xmax"))
+  
+  # Coonvert the bbox to an sf polygon, transform it to 3857, 
+  # and convert back to a bbox (convoluted, but it works)
+  bbox_3857 <- st_bbox(st_transform(st_as_sfc(st_bbox(map_bbox, crs = 4326)), 3857))
+  
+  # Overwrite the bbox of the ggmap object with the transformed coordinates 
+  attr(map, "bb")$ll.lat <- bbox_3857["ymin"]
+  attr(map, "bb")$ll.lon <- bbox_3857["xmin"]
+  attr(map, "bb")$ur.lat <- bbox_3857["ymax"]
+  attr(map, "bb")$ur.lon <- bbox_3857["xmax"]
+  map
+}
+```
+
+```{r}
+bbox <- c(-170, 52, -130, 64)   # This is roughly southern Alaska
+ak_map <- get_stamenmap(bbox, zoom = 4)
+ak_map_3857 <- ggmap_bbox_to_3857(ak_map)
+```
+
+```{r}
+ggmap(ak_map_3857) +
+  #need to set inherit.aes=F (ggmap specific thing)
+  geom_sf(data=pop_3857, aes(color=population), inherit.aes = FALSE) +
+    scale_color_continuous(low="khaki",high="firebrick",labels=comma)
+
+```
+
+More stuff in the tutorial on making maps in leaflet.
